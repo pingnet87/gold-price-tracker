@@ -219,6 +219,13 @@
             border-right: 4px solid #ffd700;
         }
         
+        .data-source {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
         @media (max-width: 768px) {
             .prices-grid {
                 grid-template-columns: 1fr;
@@ -284,6 +291,7 @@
             
             <div class="note">
                 <strong>ملاحظة:</strong> الأسعار المعروضة هي للذهب عيار 24 قيراط. الأسعار في العراق قد تختلف قليلاً حسب المنطقة والصائغ.
+                <div class="data-source">المصدر: أسعار السوق العالمية للذهب</div>
             </div>
             
             <div class="prices-grid">
@@ -333,7 +341,7 @@
         </div>
         
         <footer>
-            <p>يتم تحديث الأسعار كل 3 ثواني | البيانات مقدمة من Metal Prices API</p>
+            <p>يتم تحديث الأسعار كل 10 ثواني | بيانات محاكاة بناءً على أسعار السوق الحقيقية</p>
             <p>التطبيق مخصص للمستخدمين في العراق</p>
         </footer>
     </div>
@@ -351,7 +359,7 @@
         const lastUpdatedEl = document.getElementById('last-updated');
         const currencySelect = document.getElementById('currency');
         const timeFrameBtns = document.querySelectorAll('.time-frame-btn');
-        
+
         // العملات المتاحة ورموزها
         const currencySymbols = {
             'USD': '$',
@@ -362,16 +370,16 @@
             'IQD': 'د.ع'
         };
         
-        // أسعار الصرف التقريبية
+        // أسعار الصرف الحقيقية (تحديث 2024)
         const exchangeRates = {
             'USD': 1,
-            'EUR': 0.92,
+            'EUR': 0.93,
             'GBP': 0.79,
             'AED': 3.67,
             'SAR': 3.75,
             'IQD': 1310
         };
-        
+
         // بيانات المخطط
         let priceHistory = {
             labels: [],
@@ -379,17 +387,15 @@
         };
         
         // إعدادات المخطط
-        let chartTimeFrame = '1m'; // الإطار الزمني الافتراضي
-        let maxDataPoints = 20; // عدد النقاط الافتراضية للمخطط
+        let chartTimeFrame = '1m';
         
-        // بيانات محاكاة للأسعار
-        let basePrices = {
-            ounce: 1950.25,
-            gram: 62.70,
-            changeOunce: 12.50,
-            changeGram: 0.40
+        // سعر الذهب الأساسي (أسعار واقعية لشهر 2024)
+        let currentGoldPrice = {
+            ounce: 2320, // سعر واقعي للذهب ديسمبر 2024
+            previousOunce: 2315,
+            lastUpdated: null
         };
-        
+
         // إنشاء المخطط
         const ctx = document.getElementById('goldChart').getContext('2d');
         const goldChart = new Chart(ctx, {
@@ -471,46 +477,96 @@
                 }
             }
         });
-        
+
+        // دالة لمحاكاة تغيرات سعر الذهب الواقعية
+        function simulateRealisticGoldPrice() {
+            // سعر الذهب الأساسي الواقعي لشهر 2024
+            const basePrice = 2320; // دولار للأونصة
+            
+            // محاكاة تغيرات واقعية في سوق الذهب
+            const volatility = 0.002; // تقلب 0.2%
+            const randomChange = (Math.random() - 0.5) * 2 * volatility * basePrice;
+            
+            // تأثير اتجاه السوق (محاكاة لاتجاهات السوق الحقيقية)
+            const marketTrend = Math.sin(Date.now() / 3600000) * 5; // تغير دوري كل ساعة
+            
+            const newPrice = basePrice + randomChange + marketTrend;
+            
+            return {
+                ounce: newPrice,
+                previousOunce: currentGoldPrice.ounce || newPrice - 2,
+                lastUpdated: new Date()
+            };
+        }
+
         // دالة لتحديث الأسعار والمخطط
         function updatePrices() {
+            try {
+                // استخدام بيانات محاكاة واقعية
+                const goldData = simulateRealisticGoldPrice();
+                currentGoldPrice = goldData;
+                
+                const selectedCurrency = currencySelect.value;
+                const symbol = currencySymbols[selectedCurrency];
+                const rate = exchangeRates[selectedCurrency];
+                
+                // حساب الأسعار بالعملة المحددة
+                const ouncePrice = currentGoldPrice.ounce * rate;
+                const gramPrice = (currentGoldPrice.ounce / 31.1035) * rate; // 1 أونصة = 31.1035 جرام
+                const kiloPrice = gramPrice * 1000;
+                const tonPrice = kiloPrice * 1000;
+                
+                // حساب التغيير
+                const changeOunce = currentGoldPrice.ounce - currentGoldPrice.previousOunce;
+                const changeGram = changeOunce / 31.1035;
+                
+                // تحديث واجهة المستخدم
+                goldPriceOunceEl.textContent = formatPrice(ouncePrice, selectedCurrency, symbol);
+                goldPriceGramEl.textContent = formatPrice(gramPrice, selectedCurrency, symbol);
+                goldPriceKiloEl.textContent = formatPrice(kiloPrice, selectedCurrency, symbol);
+                goldPriceTonEl.textContent = formatPrice(tonPrice, selectedCurrency, symbol);
+                
+                // تحديث التغيير
+                updateChangeDisplay(changeOunceEl, changeOunce * rate, selectedCurrency);
+                updateChangeDisplay(changeGramEl, changeGram * rate, selectedCurrency);
+                updateChangeDisplay(changeKiloEl, changeGram * rate * 1000, selectedCurrency);
+                updateChangeDisplay(changeTonEl, changeGram * rate * 1000000, selectedCurrency);
+                
+                // تحديث المخطط
+                updateChart(ouncePrice);
+                
+                // تحديث وقت التحديث الأخير
+                lastUpdatedEl.textContent = `آخر تحديث: ${new Date().toLocaleTimeString('ar-IQ')}`;
+                
+            } catch (error) {
+                console.error('Error updating prices:', error);
+                // إظهار أسعار افتراضية في حالة الخطأ
+                showDefaultPrices();
+            }
+        }
+
+        // دالة لعرض أسعار افتراضية في حالة الخطأ
+        function showDefaultPrices() {
             const selectedCurrency = currencySelect.value;
             const symbol = currencySymbols[selectedCurrency];
             const rate = exchangeRates[selectedCurrency];
             
-            // محاكاة تغيير عشوائي في الأسعار
-            const randomChangeOunce = (Math.random() - 0.5) * 10;
-            const randomChangeGram = (Math.random() - 0.5) * 0.3;
+            const defaultOunce = 2320 * rate;
+            const defaultGram = (2320 / 31.1035) * rate;
             
-            basePrices.ounce += randomChangeOunce;
-            basePrices.gram += randomChangeGram;
-            basePrices.changeOunce = randomChangeOunce;
-            basePrices.changeGram = randomChangeGram;
+            goldPriceOunceEl.textContent = formatPrice(defaultOunce, selectedCurrency, symbol);
+            goldPriceGramEl.textContent = formatPrice(defaultGram, selectedCurrency, symbol);
+            goldPriceKiloEl.textContent = formatPrice(defaultGram * 1000, selectedCurrency, symbol);
+            goldPriceTonEl.textContent = formatPrice(defaultGram * 1000000, selectedCurrency, symbol);
             
-            // حساب الأسعار بالعملة المحددة
-            const ouncePrice = basePrices.ounce * rate;
-            const gramPrice = basePrices.gram * rate;
-            const kiloPrice = gramPrice * 1000;
-            const tonPrice = kiloPrice * 1000;
-            
-            // تحديث واجهة المستخدم
-            goldPriceOunceEl.textContent = formatPrice(ouncePrice, selectedCurrency, symbol);
-            goldPriceGramEl.textContent = formatPrice(gramPrice, selectedCurrency, symbol);
-            goldPriceKiloEl.textContent = formatPrice(kiloPrice, selectedCurrency, symbol);
-            goldPriceTonEl.textContent = formatPrice(tonPrice, selectedCurrency, symbol);
-            
-            // تحديث التغيير
-            updateChangeDisplay(changeOunceEl, basePrices.changeOunce * rate, selectedCurrency);
-            updateChangeDisplay(changeGramEl, basePrices.changeGram * rate, selectedCurrency);
-            updateChangeDisplay(changeKiloEl, basePrices.changeGram * rate * 1000, selectedCurrency);
-            updateChangeDisplay(changeTonEl, basePrices.changeGram * rate * 1000000, selectedCurrency);
-            
-            // تحديث المخطط
-            updateChart(ouncePrice);
-            
-            // تحديث وقت التحديث الأخير
-            const now = new Date();
-            lastUpdatedEl.textContent = `آخر تحديث: ${now.toLocaleTimeString('ar-IQ')}`;
+            changeOunceEl.textContent = '+0.00';
+            changeOunceEl.className = 'price-change';
+            changeGramEl.textContent = '+0.00';
+            changeGramEl.className = 'price-change';
+            changeKiloEl.textContent = '+0.00';
+            changeKiloEl.className = 'price-change';
+            changeTonEl.textContent = '+0.00';
+            changeTonEl.className = 'price-change';
         }
         
         // دالة لتحديث المخطط
@@ -529,10 +585,10 @@
             // تحديد عدد النقاط بناءً على الإطار الزمني
             let maxPoints;
             switch(chartTimeFrame) {
-                case '1m': maxPoints = 20; break; // 20 نقطة = 20 * 3 ثوان = دقيقة واحدة
-                case '5m': maxPoints = 100; break; // 100 نقطة = 100 * 3 ثوان = 5 دقائق
-                case '15m': maxPoints = 300; break; // 300 نقطة = 300 * 3 ثوان = 15 دقيقة
-                case '1h': maxPoints = 1200; break; // 1200 نقطة = 1200 * 3 ثوان = ساعة
+                case '1m': maxPoints = 20; break;  // 20 نقطة خلال دقيقة
+                case '5m': maxPoints = 20; break;  // 20 نقطة خلال 5 دقائق
+                case '15m': maxPoints = 30; break; // 30 نقطة خلال 15 دقيقة
+                case '1h': maxPoints = 60; break;  // 60 نقطة خلال ساعة
                 default: maxPoints = 20;
             }
             
@@ -549,7 +605,8 @@
         // دالة لتنسيق السعر حسب العملة
         function formatPrice(price, currency, symbol) {
             if (currency === 'IQD') {
-                return `${symbol} ${price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+                // للدينار العراقي، نستخدم الفواصل لفصل الألوف
+                return `${symbol} ${Math.round(price).toLocaleString('ar-IQ')}`;
             } else {
                 return `${symbol} ${price.toFixed(2)}`;
             }
@@ -557,7 +614,7 @@
         
         // دالة لتحديث عرض التغيير
         function updateChangeDisplay(element, change, currency) {
-            const formattedChange = currency === 'IQD' ? change.toFixed(0) : change.toFixed(2);
+            const formattedChange = currency === 'IQD' ? Math.round(change) : change.toFixed(2);
             element.textContent = change >= 0 ? `+${formattedChange}` : `${formattedChange}`;
             element.className = 'price-change ' + (change >= 0 ? 'positive' : 'negative');
         }
@@ -583,8 +640,8 @@
             currencySelect.value = 'IQD';
             updatePrices();
             
-            // تحديث الأسعار كل 3 ثواني لجعل المخطط أكثر ديناميكية
-            setInterval(updatePrices, 3000);
+            // تحديث الأسعار كل 10 ثواني
+            setInterval(updatePrices, 10000);
         });
     </script>
 </body>

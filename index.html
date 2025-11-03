@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>قائمة المشروبات - فندق البرج الأبيض</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- مكتبة qz-tray للطباعة -->
+    <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.1.0/dist/js/qz-tray.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
         
@@ -342,10 +344,28 @@
             cursor: pointer;
             width: 100%;
             transition: all 0.3s ease;
+            margin-bottom: 0.5rem;
         }
 
         .print-btn:active {
             background: var(--primary);
+            transform: scale(0.98);
+        }
+
+        .print-thermal-btn {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 25px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s ease;
+        }
+
+        .print-thermal-btn:active {
+            background: #219653;
             transform: scale(0.98);
         }
         
@@ -391,6 +411,27 @@
         
         .menu-section {
             animation: fadeIn 0.5s ease-out;
+        }
+
+        /* حالة الطباعة */
+        .print-status {
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+
+        .print-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .print-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
     </style>
 </head>
@@ -566,6 +607,10 @@
                     <h3 class="orders-title">طلباتي</h3>
                     <button class="close-btn" onclick="hideOrders()">×</button>
                 </div>
+                
+                <!-- حالة الطباعة -->
+                <div id="printStatus" class="print-status"></div>
+                
                 <div id="ordersList">
                     <!-- الطلبات تظهر هنا -->
                 </div>
@@ -573,7 +618,10 @@
                     <div>المجموع الكلي:</div>
                     <div class="total-price" id="totalPrice">0 دينار</div>
                     <button class="print-btn" onclick="printOrder()">
-                        <i class="fas fa-print"></i> طباعة الطلب
+                        <i class="fas fa-print"></i> طباعة عادية
+                    </button>
+                    <button class="print-thermal-btn" onclick="printThermal()">
+                        <i class="fas fa-receipt"></i> طباعة على الطابعة الحرارية
                     </button>
                 </div>
             </div>
@@ -586,6 +634,7 @@
 
     <script>
         let cart = [];
+        let isQZConnected = false;
         
         // إظهار السنة الحالية تلقائياً
         document.getElementById('year').textContent = new Date().getFullYear();
@@ -605,10 +654,6 @@
             }
             
             updateCartUI();
-            
-            // تأثير مرئي للتأكيد
-            const event = new CustomEvent('itemAdded', { detail: { name, price } });
-            document.dispatchEvent(event);
         }
         
         // تحديث واجهة السلة
@@ -682,10 +727,10 @@
             document.getElementById('ordersModal').style.display = 'none';
         }
         
-        // طباعة الطلب
+        // طباعة عادية
         function printOrder() {
             if (cart.length === 0) {
-                alert('السلة فارغة! أضف بعض المشروبات أولاً.');
+                showPrintStatus('السلة فارغة! أضف بعض المشروبات أولاً.', 'error');
                 return;
             }
             
@@ -743,21 +788,159 @@
             printWindow.document.close();
             printWindow.focus();
             
-            // الانتظار قليلاً قبل الطباعة لضمان تحميل المحتوى
             setTimeout(() => {
                 printWindow.print();
                 printWindow.close();
-                
-                // تفريغ السلة بعد الطباعة
-                cart = [];
-                updateCartUI();
-                hideOrders();
-                
-                alert('تم طباعة الطلب بنجاح! 🎉');
+                clearCart();
+                showPrintStatus('تم طباعة الطلب بنجاح! 🎉', 'success');
             }, 500);
         }
         
-        // إنشاء محتوى الطباعة
+        // طباعة على الطابعة الحرارية
+        async function printThermal() {
+            if (cart.length === 0) {
+                showPrintStatus('السلة فارغة! أضف بعض المشروبات أولاً.', 'error');
+                return;
+            }
+            
+            try {
+                // محاولة الطباعة المباشرة
+                await printToThermalPrinter();
+                showPrintStatus('تم إرسال الطلب إلى الطابعة الحرارية بنجاح! 🎉', 'success');
+                clearCart();
+            } catch (error) {
+                console.error('خطأ في الطباعة:', error);
+                showPrintStatus('خطأ في الطباعة: ' + error.message, 'error');
+            }
+        }
+        
+        // الطباعة على الطابعة الحرارية
+        async function printToThermalPrinter() {
+            const receiptContent = generateReceiptContent();
+            
+            // محاولة استخدام Web USB API للطباعة المباشرة
+            if ('usb' in navigator) {
+                try {
+                    await printViaWebUSB(receiptContent);
+                    return;
+                } catch (error) {
+                    console.log('Web USB failed, trying alternative methods');
+                }
+            }
+            
+            // محاولة استخدام QZ Tray
+            try {
+                await printViaQZTray(receiptContent);
+                return;
+            } catch (error) {
+                console.log('QZ Tray failed, trying fallback');
+            }
+            
+            // طريقة احتياطية - تحميل ملف نصي للطباعة
+            printViaTextFile(receiptContent);
+        }
+        
+        // الطباعة عبر Web USB
+        async function printViaWebUSB(content) {
+            // هذا مثال مبسط - تحتاج لتعديله حسب الطابعة الخاصة بك
+            const vendorId = 0x1234; // ضع Vendor ID الخاص بطابعتك
+            const productId = 0x5678; // ضع Product ID الخاص بطابعتك
+            
+            const device = await navigator.usb.requestDevice({ 
+                filters: [{ vendorId, productId }] 
+            });
+            
+            await device.open();
+            await device.selectConfiguration(1);
+            await device.claimInterface(0);
+            
+            const encoder = new TextEncoder();
+            const data = encoder.encode(content);
+            
+            await device.transferOut(1, data);
+            await device.close();
+        }
+        
+        // الطباعة عبر QZ Tray
+        async function printViaQZTray(content) {
+            if (!qz.websocket.isActive()) {
+                await qz.websocket.connect();
+            }
+            
+            const config = qz.configs.create("Printer Name"); // اسم الطابعة
+            
+            const data = [
+                {
+                    type: 'raw',
+                    data: content
+                }
+            ];
+            
+            await qz.print(config, data);
+        }
+        
+        // الطباعة عبر ملف نصي (طريقة احتياطية)
+        function printViaTextFile(content) {
+            const blob = new Blob([content], { type: 'text/plain; charset=arabic' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'طلب_مشروبات.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            showPrintStatus('تم حفظ الطلب في ملف. يرجى فتح الملف وطباعته يدوياً.', 'success');
+        }
+        
+        // إنشاء محتوى الإيصال للطابعة الحرارية
+        function generateReceiptContent() {
+            const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const now = new Date();
+            const dateStr = now.toLocaleString('ar-EG');
+            
+            let content = '\x1B\x40'; // تهيئة الطابعة
+            content += '\x1B\x61\x01'; // محاذاة مركز
+            
+            // العنوان
+            content += 'فندق البرج الأبيض\n';
+            content += 'طلب مشروبات\n';
+            content += '====================\n';
+            
+            content += '\x1B\x61\x00'; // محاذاة يسار
+            
+            // التاريخ والوقت
+            content += `التاريخ: ${dateStr}\n`;
+            content += '====================\n';
+            
+            // تفاصيل الطلب
+            cart.forEach(item => {
+                const line = `${item.name} x${item.quantity}`;
+                const price = `${(item.price * item.quantity).toLocaleString()} دينار`;
+                content += line + '\n';
+                content += price.padStart(40 - line.length) + '\n';
+            });
+            
+            content += '====================\n';
+            content += '\x1B\x61\x02'; // محاذاة يمين
+            
+            // المجموع
+            content += `المجموع: ${total.toLocaleString()} دينار\n`;
+            content += '\n';
+            
+            // رسالة شكر
+            content += '\x1B\x61\x01'; // محاذاة مركز
+            content += 'شكراً لزيارتكم!\n';
+            content += 'نتمنى لكم إقامة سعيدة\n';
+            
+            // قص الورق
+            content += '\n\n\n\n\n';
+            content += '\x1B\x69'; // قص الورق (للبعض الطابعات)
+            content += '\x1B\x6D'; // قص الورق (للبعض الآخر)
+            
+            return content;
+        }
+        
+        // إنشاء محتوى الطباعة العادية
         function generatePrintContent() {
             const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             const now = new Date();
@@ -793,6 +976,25 @@
             return content;
         }
         
+        // تفريغ السلة
+        function clearCart() {
+            cart = [];
+            updateCartUI();
+            hideOrders();
+        }
+        
+        // إظهار حالة الطباعة
+        function showPrintStatus(message, type) {
+            const statusEl = document.getElementById('printStatus');
+            statusEl.textContent = message;
+            statusEl.className = `print-status print-${type}`;
+            statusEl.style.display = 'block';
+            
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        }
+        
         // تحسينات للأجهزة المحمولة
         document.addEventListener('touchstart', function(){}, {passive: true});
         
@@ -801,6 +1003,14 @@
             if (e.target === this) {
                 hideOrders();
             }
+        });
+        
+        // تهيئة QZ Tray
+        qz.websocket.connect().then(() => {
+            isQZConnected = true;
+            console.log('QZ Tray connected');
+        }).catch(err => {
+            console.log('QZ Tray not available:', err);
         });
     </script>
 </body>
